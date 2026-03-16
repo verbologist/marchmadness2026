@@ -1,0 +1,38 @@
+Package: marchmadness2026
+Title: 2026 NCAA March Madness Bracket Prediction System
+Version: 1.0.0
+Date: 2026-03-16
+Authors@R: person("verbologist", email = "user@example.com", role = c("aut", "cre"))
+Description: Predicts 2026 NCAA Men's and Women's March Madness tournament outcomes
+    using an ensemble of logistic regression and XGBoost models trained on historical
+    KenPom/BartTorvik efficiency metrics (2013-2025). Includes Monte Carlo bracket
+    simulation (10,000 iterations) and a Shiny interactive bracket explorer.
+    Methodology based on: arXiv:2603.10916 (CFA ensemble), arXiv:2503.21790
+    (efficiency-based logistic regression), and Scheiner et al. (LSTM/Transformer).
+Depends: R (>= 4.5.0)
+Imports:
+    tidyverse,
+    dplyr,
+    tidyr,
+    purrr,
+    readr,
+    stringr,
+    ggplot2,
+    scales,
+    httr2,
+    jsonlite,
+    rvest,
+    xgboost,
+    glmnet,
+    tidymodels,
+    here,
+    hoopR,
+    wehoop,
+    cbbdata,
+    furrr,
+    future,
+    shiny,
+    RColorBrewer,
+    lubridate
+License: MIT
+Encoding: UTF-8

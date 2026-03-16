@@ -1,0 +1,17 @@
+# R project files
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj.user
+
+# Environment / secrets
+.Renviron
+
+# Data and outputs (large files, created at runtime)
+data/
+output/
+
+# OS
+.DS_Store
+Thumbs.db
