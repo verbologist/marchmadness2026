@@ -395,6 +395,14 @@ build_predict_features_2026 <- function(gender = c("men", "women"),
     tourn_teams <- tourn_teams |> mutate(region_fam = 0L)
   }
 
+  # Ensure all required stat columns exist (women's stats lack some men's columns)
+  required_zero_cols <- c("tempo", "off_ppp", "def_ppp",
+                          "def_efg", "def_to", "def_or", "def_ftr")
+  for (col in required_zero_cols) {
+    if (!col %in% names(tourn_teams))
+      tourn_teams[[col]] <- 0
+  }
+
   # All pairwise combinations
   n <- nrow(tourn_teams)
   pairs <- expand.grid(a = seq_len(n), b = seq_len(n)) |>

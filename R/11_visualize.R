@@ -36,6 +36,20 @@ create_visualizations <- function(gender = c("men", "women")) {
     stop("Simulation results not found. Run 10_monte_carlo.R first.")
   }
 
+  # Join seed from seeds_all.csv (needed for labels)
+  seeds_df <- tryCatch(
+    safe_read_csv(file.path(paths$processed, "seeds_all.csv")) |>
+      filter(year == CURRENT_SEASON) |>
+      select(team_name, seed),
+    error = function(e) NULL
+  )
+  if (!is.null(seeds_df)) {
+    champ_df  <- champ_df  |> left_join(seeds_df, by = "team_name")
+    adv_probs <- adv_probs |> left_join(seeds_df, by = "team_name")
+  }
+  if (!"seed" %in% names(champ_df))  champ_df$seed  <- NA_integer_
+  if (!"seed" %in% names(adv_probs)) adv_probs$seed <- NA_integer_
+
   title_suffix <- paste("2026", str_to_title(gender), "NCAA Tournament")
 
   # ---------------------------------------------------------------------------

@@ -2,48 +2,40 @@
 # main.R -- NCAA March Madness 2026 Bracket Prediction Pipeline
 # =============================================================================
 # Steps:
-#   1. Download historical game results (2013-2025)
-#   2. Download current 2026 team stats
-#   3. Download NET rankings
-#   4. Download 2026 bracket matchups
-#   5. Engineer matchup features
-#   6. Train ensemble model (Logistic Regression + XGBoost)
-#   7. Evaluate model performance
-#   8. Generate 2026 win probability predictions
-#   9. Run Monte Carlo bracket simulation (10,000 iterations)
-#  10. Create visualizations
+#   0. Initialize directories
+#   1. Download historical data (seeds, tournament games, team stats)
+#   2. Download recent form (last 10 games, men)
+#   3. Download 2026 bracket structure
+#   4. Feature engineering (training matchups + 2026 prediction features)
+#   5. Train ensemble model (Logistic Regression + XGBoost)
+#   6. Evaluate model performance
+#   7. Generate 2026 win probability matrix
+#   8. Apply injury adjustments to win probability matrix
+#   9. Run Monte Carlo bracket simulations (10,000 iterations)
+#  10. Create visualizations + bracket plots
 #
 # Usage:
-#   Rscript main.R                   # Full pipeline, both genders
-#   Rscript main.R --skip-download   # Skip data download (use cached)
-#   Rscript main.R --men-only        # Men's tournament only
-#   Rscript main.R --women-only      # Women's tournament only
+#   source("main.R")                        # Full pipeline, both genders
+#   source("main.R")  # with args set below to skip download
 #
 # Prerequisites:
-#   1. Run R/01_install_packages.R to install required packages
-#   2. Set CBBDATA_KEY in .Renviron for BartTorvik data (free key at cbbdata.io)
+#   Run R/01_install_packages.R first.
+#   Set CBBDATA_KEY in .Renviron (free at cbbdata.aweatherman.com).
 # =============================================================================
 
-library(here)
+setwd("C:/claudegit/marchmadness2026")
 t_start <- proc.time()
 
-# Parse command-line arguments
-args           <- commandArgs(trailingOnly = TRUE)
-skip_download  <- "--skip-download" %in% args
-gender_filter  <- if ("--men-only"   %in% args) "men" else
-                  if ("--women-only" %in% args) "women" else
-                  c("men", "women")
+# ---- Options ----
+SKIP_DOWNLOAD <- FALSE   # Set TRUE to use cached data/processed files
+RUN_MEN       <- TRUE
+RUN_WOMEN     <- TRUE
+FORCE_REBUILD <- FALSE   # Set TRUE to force re-download/rebuild all cached steps
 
-cat("=============================================================\n")
-cat("  NCAA March Madness 2026 Bracket Prediction Pipeline\n")
-cat("  Date:", format(Sys.Date(), "%B %d, %Y"), "\n")
-cat("  Genders:", paste(gender_filter, collapse = ", "), "\n")
-cat("  Skip download:", skip_download, "\n")
-cat("=============================================================\n\n")
+gender_filter <- c(if (RUN_MEN) "men", if (RUN_WOMEN) "women")
 
-# ---------------------------------------------------------------------------
-# Source all modules
-# ---------------------------------------------------------------------------
+# ---- Load all modules ----
+library(here)
 source(here::here("R", "utils.R"))
 source(here::here("R", "00_config.R"))
 source(here::here("R", "02_download_historical.R"))
@@ -53,122 +45,190 @@ source(here::here("R", "06_feature_engineering.R"))
 source(here::here("R", "07_model_train.R"))
 source(here::here("R", "08_model_evaluate.R"))
 source(here::here("R", "09_predict_2026.R"))
-source(here::here("R", "10_monte_carlo.R"))
 source(here::here("R", "11_visualize.R"))
 
+cat("=============================================================\n")
+cat("  NCAA March Madness 2026 Bracket Prediction Pipeline\n")
+cat("  Date:", format(Sys.Date(), "%B %d, %Y"), "\n")
+cat("  Genders:", paste(gender_filter, collapse = ", "), "\n")
+cat("  Skip download:", SKIP_DOWNLOAD, "\n")
+cat("=============================================================\n\n")
+
 # ---------------------------------------------------------------------------
-# Step 0: Initialize directories
+# STEP 0: Initialize directories
 # ---------------------------------------------------------------------------
 banner("STEP 0: Initializing directories")
 ensure_dirs()
 
 # ---------------------------------------------------------------------------
-# Step 1: Download historical game results
+# STEP 1: Download historical data
 # ---------------------------------------------------------------------------
-if (!skip_download) {
-  banner("STEP 1: Downloading historical game results (2013-2025)")
-  if ("men"   %in% gender_filter) download_historical_men()
-  if ("women" %in% gender_filter) download_historical_women()
+if (!SKIP_DOWNLOAD) {
+  banner("STEP 1: Downloading historical data (2013-2025)")
+
+  if (RUN_MEN) {
+    download_tournament_seeds(gender = "men",   seasons = HIST_SEASONS, force = FORCE_REBUILD)
+    download_tournament_games_men(seasons = HIST_SEASONS,               force = FORCE_REBUILD)
+    download_team_stats_men(seasons = c(HIST_SEASONS, CURRENT_SEASON),  force = FORCE_REBUILD)
+  }
+  if (RUN_WOMEN) {
+    download_tournament_seeds(gender = "women", seasons = HIST_SEASONS, force = FORCE_REBUILD)
+    download_team_stats_women(seasons = c(HIST_SEASONS, CURRENT_SEASON),force = FORCE_REBUILD)
+  }
 } else {
-  banner("STEP 1: Skipping download (--skip-download)")
+  banner("STEP 1: Skipping download (SKIP_DOWNLOAD = TRUE)")
 }
 
 # ---------------------------------------------------------------------------
-# Step 2: Download team advanced stats
+# STEP 2: Download recent form (men's last-10-game rolling efficiency)
 # ---------------------------------------------------------------------------
-if (!skip_download) {
-  banner("STEP 2: Downloading advanced team stats (KenPom/BartTorvik)")
-  if ("men"   %in% gender_filter) download_team_stats_men()
-  if ("women" %in% gender_filter) download_team_stats_women()
+if (!SKIP_DOWNLOAD && RUN_MEN) {
+  banner("STEP 2: Downloading recent form (last 10 games, men)")
+  download_torvik_recent_form(seasons = c(HIST_SEASONS, CURRENT_SEASON), force = FORCE_REBUILD)
+} else {
+  banner("STEP 2: Skipping recent form download")
 }
 
 # ---------------------------------------------------------------------------
-# Step 3: Download NET rankings
+# STEP 3: Download 2026 bracket structure
 # ---------------------------------------------------------------------------
-if (!skip_download) {
-  banner("STEP 3: Downloading NET rankings")
+if (!SKIP_DOWNLOAD) {
+  banner("STEP 3: Downloading 2026 bracket structure")
   for (g in gender_filter) {
-    tryCatch(
-      download_net_rankings(gender = g, season = CURRENT_SEASON),
-      error = function(e) message("NET rankings failed for ", g, ": ", e$message)
-    )
+    download_historical_brackets(gender = g, force = FORCE_REBUILD)
+    download_bracket_2026(gender = g,        force = FORCE_REBUILD)
   }
+} else {
+  banner("STEP 3: Skipping bracket download")
 }
 
 # ---------------------------------------------------------------------------
-# Step 4: Download 2026 bracket structure + historical brackets
+# STEP 4: Feature engineering
 # ---------------------------------------------------------------------------
-if (!skip_download) {
-  banner("STEP 4: Downloading 2026 bracket structure")
-  for (g in gender_filter) {
-    download_historical_brackets(gender = g)
-    download_bracket_2026(gender = g)
-  }
-}
-
-# ---------------------------------------------------------------------------
-# Step 5: Feature engineering
-# ---------------------------------------------------------------------------
-banner("STEP 5: Engineering matchup features")
+banner("STEP 4: Engineering matchup features")
 for (g in gender_filter) {
-  build_matchup_features(gender = g)
-  build_predict_features_2026(gender = g)
+  matchups <- build_matchup_features(gender = g, force = FORCE_REBUILD)
+  cat(g, "training rows:", nrow(matchups), "\n")
+  pred <- build_predict_features_2026(gender = g, force = FORCE_REBUILD)
+  cat(g, "2026 prediction rows:", nrow(pred), "\n")
 }
 
 # ---------------------------------------------------------------------------
-# Step 6: Train ensemble model
+# STEP 5: Train ensemble model
 # ---------------------------------------------------------------------------
-banner("STEP 6: Training ensemble model (Logistic Regression + XGBoost)")
+banner("STEP 5: Training ensemble model (Logistic Regression + XGBoost)")
 for (g in gender_filter) {
-  train_ensemble(gender = g)
+  train_ensemble(gender = g, force = FORCE_REBUILD)
 }
 
 # ---------------------------------------------------------------------------
-# Step 7: Evaluate models
+# STEP 6: Evaluate model performance
 # ---------------------------------------------------------------------------
-banner("STEP 7: Evaluating model performance")
+banner("STEP 6: Evaluating model performance")
 for (g in gender_filter) {
   tryCatch(
     evaluate_model(gender = g),
-    error = function(e) message("Model evaluation failed: ", e$message)
+    error = function(e) message("  Model evaluation failed for ", g, ": ", e$message)
   )
 }
 
 # ---------------------------------------------------------------------------
-# Step 8: Generate 2026 predictions
+# STEP 7: Generate 2026 win probability matrix
 # ---------------------------------------------------------------------------
-banner("STEP 8: Generating 2026 win probability predictions")
+banner("STEP 7: Generating 2026 win probability matrices")
 for (g in gender_filter) {
   predict_2026(gender = g)
 }
 
 # ---------------------------------------------------------------------------
-# Step 9: Monte Carlo simulation
+# STEP 8: Apply injury adjustments
 # ---------------------------------------------------------------------------
-banner(sprintf("STEP 9: Running Monte Carlo simulation (%s iterations)", format(N_SIMS, big.mark=",")))
-for (g in gender_filter) {
-  simulate_bracket(gender = g, n_sims = N_SIMS)
+banner("STEP 8: Applying injury adjustments")
+
+# Injury penalties (adj_EM reduction): ppg * 0.30 for OUT, * 0.15 for Questionable
+# Sources: actionnetwork.com NCAA tournament injury report, March 17 2026
+MEN_INJURY_PENALTIES <- c(
+  "Miami Hurricanes"          = 8.27,  # JT Toppin OUT (ACL) -- star PF
+  "Duke Blue Devils"          = 2.85,  # Caleb Foster OUT (foot) -- PG
+  "Texas Tech Red Raiders"    = 2.55,
+  "Wisconsin Badgers"         = 1.80,
+  "UConn Huskies"             = 1.50,
+  "Tennessee Volunteers"      = 1.20,
+  "Gonzaga Bulldogs"          = 1.05,
+  "Alabama Crimson Tide"      = 0.90,
+  "Kentucky Wildcats"         = 0.75
+)
+
+WOMEN_INJURY_PENALTIES <- c(
+  "Maryland Terrapins"        = 3.50,  # 2 season-ending injuries
+  "Colorado State Rams"       = 2.10   # Bargesser OUT (knee)
+)
+
+logit  <- function(p) log(p / (1 - p))
+ilogit <- function(x) 1 / (1 + exp(-x))
+
+apply_injury_adj <- function(gender, penalties) {
+  base_path <- file.path("data/processed", gender, "win_prob_matrix_2026.csv")
+  adj_path  <- file.path("data/processed", gender, "win_prob_matrix_2026_injury_adj.csv")
+
+  pm <- readr::read_csv(base_path, show_col_types = FALSE)
+  pm_adj <- pm |>
+    dplyr::mutate(
+      pen_a = dplyr::coalesce(penalties[team_a_name], 0),
+      pen_b = dplyr::coalesce(penalties[team_b_name], 0),
+      shift = 0.10 * (pen_a - pen_b),
+      win_prob_ens = dplyr::case_when(
+        pen_a == 0 & pen_b == 0 ~ win_prob_ens,
+        TRUE ~ ilogit(logit(pmin(pmax(win_prob_ens, 0.001), 0.999)) - shift)
+      )
+    ) |>
+    dplyr::select(-pen_a, -pen_b, -shift)
+
+  readr::write_csv(pm_adj, adj_path)
+  message("  Injury-adjusted matrix saved: ", adj_path)
+  invisible(pm_adj)
+}
+
+if (RUN_MEN)   apply_injury_adj("men",   MEN_INJURY_PENALTIES)
+if (RUN_WOMEN) apply_injury_adj("women", WOMEN_INJURY_PENALTIES)
+
+# ---------------------------------------------------------------------------
+# STEP 9: Monte Carlo bracket simulation
+# ---------------------------------------------------------------------------
+banner(sprintf("STEP 9: Running Monte Carlo simulation (%s iterations)", format(N_SIMS, big.mark = ",")))
+
+if (RUN_MEN) {
+  source(here::here("R", "simulate_2026.R"))
+  run_simulation(N = N_SIMS, seed = RANDOM_SEED, injury_adj = TRUE)
+}
+if (RUN_WOMEN) {
+  source(here::here("R", "simulate_2026_women.R"))
+  run_simulation_women(N = N_SIMS, seed = RANDOM_SEED)
 }
 
 # ---------------------------------------------------------------------------
-# Step 10: Visualizations
+# STEP 10: Visualizations + bracket plots
 # ---------------------------------------------------------------------------
-banner("STEP 10: Creating visualizations")
+banner("STEP 10: Creating visualizations and bracket plots")
 for (g in gender_filter) {
   tryCatch(
     create_visualizations(gender = g),
-    error = function(e) message("Visualization failed: ", e$message)
+    error = function(e) message("  Visualization failed for ", g, ": ", e$message)
   )
 }
+
+tryCatch(
+  source(here::here("R", "13_bracket_plots.R")),
+  error = function(e) message("  Bracket plots failed: ", e$message)
+)
 
 # ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
 t_elapsed <- (proc.time() - t_start)["elapsed"]
 banner(sprintf("PIPELINE COMPLETE in %.1f minutes", t_elapsed / 60))
-message("Outputs:")
-message("  Men's:   ", file.path(OUTPUT_DIR, "men"))
-message("  Women's: ", file.path(OUTPUT_DIR, "women"))
-message("")
-message("Launch Shiny app:")
-message("  shiny::runApp('shiny/app.R')")
+cat("Outputs:\n")
+cat("  Men's:   output/men/\n")
+cat("  Women's: output/women/\n")
+cat("\nLaunch Shiny app:\n")
+cat("  shiny::runApp('shiny/app.R')\n")
