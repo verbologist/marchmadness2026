@@ -64,9 +64,9 @@ BRACKET_OPPS <- list(
   South  = c("FF_Lehigh_PV","Iowa Hawkeyes","McNeese Cowboys","Troy Trojans",
              "VCU Rams","Pennsylvania Quakers","Texas A&M Aggies","Idaho Vandals"),
   Midwest= c("FF_Howard_UMBC","Saint Louis Billikens","Akron Zips","Hofstra Pride",
-             "FF_NCState_Texas","Wright State Raiders","Santa Clara Broncos","Tennessee State Tigers"),
+             "FF_SMU_MiamiOH","Wright State Raiders","Santa Clara Broncos","Tennessee State Tigers"),
   West   = c("Long Island University Sharks","Utah State Aggies","High Point Panthers","Hawai'i Rainbow Warriors",
-             "FF_SMU_MiamiOH","Kennesaw State Owls","Missouri Tigers","Queens University Royals")
+             "FF_NCState_Texas","Kennesaw State Owls","Missouri Tigers","Queens University Royals")
 )
 
 # First Four: a vs b -> winner replaces FF_* placeholder
@@ -77,8 +77,8 @@ FF_GAMES <- list(
   list(a="Lehigh Mountain Hawks",   b="Prairie View A&M Panthers", placeholder="FF_Lehigh_PV")
 )
 
-# Final Four pairings (region winner matchups): East vs West, South vs Midwest
-FF_PAIRS <- list(c("East","West"), c("South","Midwest"))
+# Final Four pairings: East (DC regional) vs Midwest (Chicago regional) | South (Houston) vs West (San Jose)
+FF_PAIRS <- list(c("East","Midwest"), c("South","West"))
 
 # ---- Vectorized simulation across N sims ----
 run_simulation <- function(N = 10000, seed = 2026, injury_adj = TRUE) {

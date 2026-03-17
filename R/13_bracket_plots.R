@@ -383,9 +383,9 @@ adv_m     <- tryCatch(readr::read_csv("output/men/team_advancement_probs_injury_
 
 men_layout <- list(
   East    = list(side="left",  half="top"),
-  South   = list(side="left",  half="bottom"),
-  West    = list(side="right", half="top"),
-  Midwest = list(side="right", half="bottom")
+  Midwest = list(side="left",  half="bottom"),
+  South   = list(side="right", half="top"),
+  West    = list(side="right", half="bottom")
 )
 
 # Bracket 1: Pure greedy (all favorites)
