@@ -269,60 +269,105 @@ build_bracket_segments <- function(df) {
   bind_rows(segs)
 }
 
-# ---- Main plot function ----
-plot_bracket <- function(df, title, subtitle,
-                          hi_color="#1a3a6b", win_color="#c8a400", champ_color="#9B1B30") {
-  # Color scheme: winners in hi_color, champion in champ_color, losers in gray
+# ---- Main plot function (B&W + probability bars) ----
+# adv_probs: data frame with columns team_name + prob_r64/prob_R32/prob_Sweet16/
+#            prob_Elite8/prob_FinalFour/prob_Champion (from team_advancement_probs.csv)
+plot_bracket <- function(df, title, subtitle, adv_probs = NULL) {
+
+  # Map bracket round label -> advancement prob column
+  round_to_prob <- c(
+    R64       = "prob_r64",
+    R32       = "prob_R32",
+    S16       = "prob_Sweet16",
+    E8        = "prob_Elite8",
+    RegChamp  = "prob_Elite8",
+    FF        = "prob_FinalFour",
+    FFWinner  = "prob_FinalFour",
+    ChampTeam1= "prob_Champion",
+    ChampTeam2= "prob_Champion",
+    Champion  = "prob_Champion"
+  )
+
+  # Join advancement probability
+  if (!is.null(adv_probs)) {
+    prob_long <- adv_probs |>
+      select(team_name, prob_r64, prob_R32, prob_Sweet16,
+             prob_Elite8, prob_FinalFour, prob_Champion) |>
+      tidyr::pivot_longer(-team_name, names_to = "prob_col", values_to = "win_prob")
+    df <- df |>
+      mutate(prob_col = round_to_prob[round]) |>
+      left_join(prob_long, by = c("team" = "team_name", "prob_col" = "prob_col")) |>
+      mutate(win_prob = replace_na(win_prob, 0))
+  } else {
+    df <- df |> mutate(win_prob = 0)
+  }
+
+  # Bar direction: left-side teams bar extends right; right-side teams bar extends left
+  BAR_MAX <- 0.55   # max bar width in plot units (= 100% prob)
   df <- df |> mutate(
-    fill_col = case_when(
-      is_champ ~ champ_color,
-      is_winner ~ hi_color,
-      TRUE ~ "#cccccc"
+    is_left  = x <= 6,
+    bar_x0   = if_else(is_left, x + 0.12, x - 0.12 - win_prob * BAR_MAX),
+    bar_x1   = if_else(is_left, x + 0.12 + win_prob * BAR_MAX, x - 0.12),
+    bar_col  = case_when(
+      is_champ  ~ "#1a3a6b",
+      is_winner ~ "#444444",
+      TRUE      ~ "#cccccc"
     ),
     text_col = case_when(
-      is_winner ~ "white",
-      TRUE ~ "#555555"
+      is_champ  ~ "#1a3a6b",
+      is_winner ~ "black",
+      TRUE      ~ "#888888"
     ),
-    label_size = case_when(
-      round %in% c("Champion","FFWinner","RegChamp") ~ 2.8,
-      TRUE ~ 2.2
-    )
+    text_face = if_else(is_winner, "bold", "plain"),
+    text_size = case_when(
+      round %in% c("Champion") ~ 2.8,
+      is_winner ~ 2.3,
+      TRUE ~ 2.0
+    ),
+    text_hjust = if_else(is_left, 0, 1),
+    text_x     = if_else(is_left, x - 0.62, x + 0.62)
+  )
+
+  # Slot underlines (thin gray line at each team position)
+  slot_df <- df |> filter(!round %in% c("Champion", "FFWinner", "RegChamp",
+                                          "ChampTeam1", "ChampTeam2"))
+  line_half <- 0.55
+  slot_segs <- slot_df |> mutate(
+    x0 = if_else(is_left, x - line_half, x - line_half),
+    x1 = if_else(is_left, x + line_half, x + line_half)
   )
 
   ggplot(df) +
-    # Background bands per round
-    annotate("rect", xmin=-0.2, xmax=0.7,  ymin=-1, ymax=34, fill="#e8f0ff", alpha=0.4) +
-    annotate("rect", xmin=1.0,  xmax=2.0,  ymin=-1, ymax=34, fill="#e8f0ff", alpha=0.3) +
-    annotate("rect", xmin=2.3,  xmax=3.3,  ymin=-1, ymax=34, fill="#e8f0ff", alpha=0.3) +
-    annotate("rect", xmin=3.6,  xmax=5.0,  ymin=-1, ymax=34, fill="#fff0cc", alpha=0.4) +
-    annotate("rect", xmin=5.1,  xmax=7.1,  ymin=-1, ymax=34, fill="#ffe8e8", alpha=0.4) +
-    annotate("rect", xmin=7.2,  xmax=8.6,  ymin=-1, ymax=34, fill="#e8f0ff", alpha=0.3) +
-    annotate("rect", xmin=8.9,  xmax=9.9,  ymin=-1, ymax=34, fill="#e8f0ff", alpha=0.3) +
-    annotate("rect", xmin=10.2, xmax=11.2, ymin=-1, ymax=34, fill="#e8f0ff", alpha=0.3) +
-    annotate("rect", xmin=11.5, xmax=12.5, ymin=-1, ymax=34, fill="#e8f0ff", alpha=0.4) +
-    # Round labels at top
-    annotate("text", x=c(0.25,1.5,3,4.5,5.5,6,6.5,7.5,9,10.5,12),
-             y=rep(33.5,11), size=2.5, fontface="bold", color="#333333",
-             label=c("R64","R32","S16","E8","","CHAMP","","E8","S16","R32","R64")) +
-    # Team labels
-    geom_label(
-      aes(x=x, y=y, label=short, fill=fill_col, color=text_col, size=label_size),
-      label.padding=unit(0.12,"lines"), label.r=unit(0.1,"lines"), label.size=0.2,
-      show.legend=FALSE
-    ) +
+    # Slot underlines
+    geom_segment(data = slot_segs,
+                 aes(x = x0, xend = x1, y = y - 0.42, yend = y - 0.42),
+                 color = "#dddddd", linewidth = 0.3) +
+    # Probability bars
+    geom_rect(data = filter(df, win_prob > 0.01),
+              aes(xmin = bar_x0, xmax = bar_x1, ymin = y - 0.28, ymax = y + 0.28,
+                  fill = bar_col), alpha = 0.85) +
     scale_fill_identity() +
+    # Team name text
+    geom_text(aes(x = text_x, y = y, label = short,
+                  color = text_col, hjust = text_hjust, size = text_size,
+                  fontface = text_face)) +
     scale_color_identity() +
     scale_size_identity() +
-    # Separator between top and bottom brackets
-    geom_hline(yintercept=16, linetype="dashed", color="#999999", linewidth=0.4) +
+    # Round labels at top
+    annotate("text",
+             x = c(0.25, 1.5, 3, 4.5, 5.5, 6, 6.5, 7.5, 9, 10.5, 12),
+             y = rep(33.5, 11), size = 2.5, fontface = "bold", color = "#555555",
+             label = c("R64","R32","S16","E8","FF","CHAMP","FF","E8","S16","R32","R64")) +
+    # Separator between top and bottom halves
+    geom_hline(yintercept = 16, linetype = "dotted", color = "#bbbbbb", linewidth = 0.4) +
     xlim(-0.5, 12.8) + ylim(-1, 34) +
-    labs(title=title, subtitle=subtitle) +
+    labs(title = title, subtitle = subtitle) +
     theme_void() +
     theme(
-      plot.title    = element_text(size=14, face="bold", hjust=0.5, margin=margin(b=4)),
-      plot.subtitle = element_text(size=10, hjust=0.5, color="#555555", margin=margin(b=8)),
-      plot.margin   = margin(10,10,10,10),
-      plot.background = element_rect(fill="white", color=NA)
+      plot.title      = element_text(size = 14, face = "bold", hjust = 0.5, margin = margin(b = 4)),
+      plot.subtitle   = element_text(size = 10, hjust = 0.5, color = "#555555", margin = margin(b = 8)),
+      plot.margin     = margin(12, 12, 12, 12),
+      plot.background = element_rect(fill = "white", color = NA)
     )
 }
 
@@ -330,7 +375,11 @@ plot_bracket <- function(df, title, subtitle,
 # MEN'S BRACKETS
 # =============================================================================
 message("Building men's bracket plots...")
-prob_m <- .load_prob_matrix()
+prob_m    <- .load_prob_matrix()
+adv_m     <- tryCatch(readr::read_csv("output/men/team_advancement_probs_injury_adj.csv",
+                                       show_col_types=FALSE),
+                      error = function(e) readr::read_csv("output/men/team_advancement_probs.csv",
+                                                           show_col_types=FALSE))
 
 men_layout <- list(
   East    = list(side="left",  half="top"),
@@ -344,16 +393,15 @@ br1_m <- simulate_greedy(prob_m, BRACKET_SLOTS, BRACKET_OPPS, FF_GAMES, FF_PAIRS
 df1_m <- build_bracket_df(br1_m, BRACKET_SLOTS, FF_PAIRS, men_layout)
 
 p1_m <- plot_bracket(df1_m,
-  title    = "2026 Men's NCAA Tournament — Predicted Bracket #1 (All Favorites)",
-  subtitle = paste0("Champion: ", shorten(br1_m$champ, 30),
-                    " | Final Four: ", paste(shorten(br1_m$ff_w, 20), collapse=" vs ")),
-  hi_color = "#003087", champ_color = "#c8a400")
+  title     = "2026 Men's NCAA Tournament — Predicted Bracket #1 (All Favorites)",
+  subtitle  = paste0("Champion: ", shorten(br1_m$champ, 30),
+                     " | Final Four: ", paste(shorten(br1_m$ff_w, 20), collapse=" vs ")),
+  adv_probs = adv_m)
 
 ggsave("output/men/predicted_bracket_1.png", p1_m, width=18, height=11, dpi=150)
 message("Saved predicted_bracket_1.png (men)")
 
 # Bracket 2: Force top 5 most likely R64 upsets
-# Find R64 matchups where underdog win prob is highest (closest to 50%)
 all_r64_m <- purrr::map_dfr(names(BRACKET_SLOTS), function(reg) {
   sl <- BRACKET_SLOTS[[reg]]; op <- BRACKET_OPPS[[reg]]
   purrr::map_dfr(1:8, function(i) {
@@ -366,7 +414,6 @@ all_r64_m <- purrr::map_dfr(names(BRACKET_SLOTS), function(reg) {
 cat("Top R64 upset candidates (men):\n")
 print(select(all_r64_m, fav, dog, p_dog=upset_prob) |> head(8))
 
-# Force top 5 upsets
 top5_upsets_m <- head(all_r64_m, 5)
 overrides_m <- setNames(top5_upsets_m$dog,
                          paste0(top5_upsets_m$fav, "|||", top5_upsets_m$dog))
@@ -376,10 +423,10 @@ br2_m <- simulate_greedy(prob_m, BRACKET_SLOTS, BRACKET_OPPS, FF_GAMES, FF_PAIRS
 df2_m <- build_bracket_df(br2_m, BRACKET_SLOTS, FF_PAIRS, men_layout)
 
 p2_m <- plot_bracket(df2_m,
-  title    = "2026 Men's NCAA Tournament — Predicted Bracket #2 (Top 5 Upsets Included)",
-  subtitle = paste0("Champion: ", shorten(br2_m$champ, 30),
-                    " | Final Four: ", paste(shorten(br2_m$ff_w, 20), collapse=" vs ")),
-  hi_color = "#003087", champ_color = "#c8a400")
+  title     = "2026 Men's NCAA Tournament — Predicted Bracket #2 (Top 5 Upsets Included)",
+  subtitle  = paste0("Champion: ", shorten(br2_m$champ, 30),
+                     " | Final Four: ", paste(shorten(br2_m$ff_w, 20), collapse=" vs ")),
+  adv_probs = adv_m)
 
 ggsave("output/men/predicted_bracket_2.png", p2_m, width=18, height=11, dpi=150)
 message("Saved predicted_bracket_2.png (men)")
@@ -389,6 +436,10 @@ message("Saved predicted_bracket_2.png (men)")
 # =============================================================================
 message("Building women's bracket plots...")
 prob_w <- .load_prob_matrix_women()
+adv_w  <- tryCatch(readr::read_csv("output/women/team_advancement_probs_injury_adj.csv",
+                                    show_col_types=FALSE),
+                   error = function(e) readr::read_csv("output/women/team_advancement_probs.csv",
+                                                        show_col_types=FALSE))
 
 women_layout <- list(
   Reg1_FortWorth  = list(side="left",  half="top"),
@@ -401,10 +452,10 @@ br1_w <- simulate_greedy(prob_w, BRACKET_SLOTS_W, BRACKET_OPPS_W, FF_GAMES_W, FF
 df1_w <- build_bracket_df(br1_w, BRACKET_SLOTS_W, FF_PAIRS_W, women_layout)
 
 p1_w <- plot_bracket(df1_w,
-  title    = "2026 Women's NCAA Tournament — Predicted Bracket #1 (All Favorites)",
-  subtitle = paste0("Champion: ", shorten(br1_w$champ, 30),
-                    " | Final Four: ", paste(shorten(br1_w$ff_w, 20), collapse=" vs ")),
-  hi_color = "#9B1B30", champ_color = "#c8a400")
+  title     = "2026 Women's NCAA Tournament — Predicted Bracket #1 (All Favorites)",
+  subtitle  = paste0("Champion: ", shorten(br1_w$champ, 30),
+                     " | Final Four: ", paste(shorten(br1_w$ff_w, 20), collapse=" vs ")),
+  adv_probs = adv_w)
 
 ggsave("output/women/predicted_bracket_1.png", p1_w, width=18, height=11, dpi=150)
 message("Saved predicted_bracket_1.png (women)")
@@ -431,10 +482,10 @@ br2_w <- simulate_greedy(prob_w, BRACKET_SLOTS_W, BRACKET_OPPS_W, FF_GAMES_W, FF
 df2_w <- build_bracket_df(br2_w, BRACKET_SLOTS_W, FF_PAIRS_W, women_layout)
 
 p2_w <- plot_bracket(df2_w,
-  title    = "2026 Women's NCAA Tournament — Predicted Bracket #2 (Top 5 Upsets Included)",
-  subtitle = paste0("Champion: ", shorten(br2_w$champ, 30),
-                    " | Final Four: ", paste(shorten(br2_w$ff_w, 20), collapse=" vs ")),
-  hi_color = "#9B1B30", champ_color = "#c8a400")
+  title     = "2026 Women's NCAA Tournament — Predicted Bracket #2 (Top 5 Upsets Included)",
+  subtitle  = paste0("Champion: ", shorten(br2_w$champ, 30),
+                     " | Final Four: ", paste(shorten(br2_w$ff_w, 20), collapse=" vs ")),
+  adv_probs = adv_w)
 
 ggsave("output/women/predicted_bracket_2.png", p2_w, width=18, height=11, dpi=150)
 message("Saved predicted_bracket_2.png (women)")
