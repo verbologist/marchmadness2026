@@ -94,28 +94,63 @@ MODEL_PARAMS <- list(
 # Key predictive features (ranked by importance per research literature)
 # ---------------------------------------------------------------------------
 FEATURE_COLS <- c(
-  # Most predictive (KenPom/BartTorvik efficiency)
+  # Most predictive (BartTorvik efficiency margin)
   "adj_em_diff",
   "adj_oe_diff",
   "adj_de_diff",
-  "trank_diff",
   # Seed / ranking
   "seed_diff",
   "log_seed_ratio",
-  "net_rank_diff",
-  # Shooting / possession (Four Factors)
+  # Recent form -- last 10 games (arXiv:2508.02725 SHAP rank #3-4 of 22)
+  "form_adj_em_diff",      # rolling adj_EM differential: captures injuries, momentum
+  "form_win_pct_diff",     # raw recent win rate differential
+  # Dean Oliver Four Factors (offensive)
   "efg_diff",
-  "to_rate_diff",
-  "or_rate_diff",
-  "dr_rate_diff",
-  "ft_rate_diff",
-  "three_pt_rate_diff",
+  "to_diff",
+  "or_diff",
+  "ftr_diff",
+  # Dean Oliver Four Factors (defensive)
+  "def_efg_diff",
+  "def_to_diff",
+  "def_or_diff",
+  # Points per possession
+  "ppp_diff",
   # Style
   "tempo_diff",
+  # Tempo mismatch interactions (arXiv:2508.02725 Section 3.2)
+  # tempo_diff * adj_em_diff: pace-forcing team compounds efficiency edge with possessions
+  # tempo_diff * efg_diff:    pace-forcing team also shoots better => double benefit
+  "tempo_em_interaction",
+  "tempo_efg_interaction",
+  # Regional familiarity proxy (arXiv:2503.21790 Section 4: ~2.3% win prob shift)
+  # Conference geography aligned with tournament region => fan support + travel ease
+  "region_fam_diff",
   # Upset indicators
   "is_5_12", "is_6_11", "is_7_10", "is_8_9",
+  "seed_product",
   # Context
   "round"
+)
+
+# Conference -> NCAA Tournament region alignment (used for region_fam_diff feature)
+# Based on geographic clustering of conference member institutions
+CONF_REGION_MAP <- c(
+  # East: ACC, Big East, A-10, MAAC, Patriot, NEC, Colonial, America East, MEAC
+  "ACC"="East", "Big East"="East", "Atlantic 10"="East", "A-10"="East",
+  "MAAC"="East", "Patriot"="East", "NEC"="East", "CAA"="East",
+  "America East"="East", "MEAC"="East", "Ivy"="East",
+  # South: SEC, AAC, Sun Belt, SWAC, Southern, OVC, ASUN, C-USA, Big South
+  "SEC"="South", "AAC"="South", "Sun Belt"="South", "SWAC"="South",
+  "Southern"="South", "OVC"="South", "ASUN"="South", "CUSA"="South",
+  "Big South"="South", "SOCO"="South",
+  # Midwest: Big Ten, MAC, MVC, Summit, Missouri Valley, Pioneer
+  "Big Ten"="Midwest", "MAC"="Midwest", "MVC"="Midwest",
+  "Summit"="Midwest", "Pioneer"="Midwest", "Horizon"="Midwest", "MVFC"="Midwest",
+  # West: Pac-12, MWC, WCC, WAC, Big Sky, Big West, Southland
+  "Pac-12"="West", "MWC"="West", "WCC"="West", "WAC"="West",
+  "Big Sky"="West", "Big West"="West", "Southland"="West",
+  # Big 12 spans Midwest/South -- assign Midwest (most members historically)
+  "Big 12"="Midwest"
 )
 
 # ---------------------------------------------------------------------------

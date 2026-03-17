@@ -47,6 +47,11 @@ predict_2026 <- function(gender = c("men", "women")) {
 
   # Save win probability matrix (long format)
   win_probs_long <- preds |>
+    mutate(
+      team_a_name = team_a, team_b_name = team_b,
+      team_a_seed = seed_a, team_b_seed = seed_b,
+      team_a_id   = team_a, team_b_id   = team_b
+    ) |>
     select(team_a_id, team_a_name, team_a_seed,
            team_b_id, team_b_name, team_b_seed,
            p_logistic, p_xgboost, p_ensemble) |>
@@ -69,8 +74,8 @@ predict_2026 <- function(gender = c("men", "women")) {
       filter(round %in% c(0L, 1L)) |>
       left_join(
         win_probs_long |>
-          select(team_a_id, team_b_id, win_prob_ens),
-        by = c("team1_id" = "team_a_id", "team2_id" = "team_b_id")
+          select(team_a_name, team_b_name, win_prob_ens),
+        by = c("team1_name" = "team_a_name", "team2_name" = "team_b_name")
       ) |>
       mutate(
         win_prob_ens = replace_na(win_prob_ens, 0.5),
@@ -121,8 +126,10 @@ get_win_prob <- function(team_a, team_b, gender = c("men", "women")) {
     result <- result |>
       mutate(
         win_prob_ens = 1 - win_prob_ens,
-        tmp_name = team_a_name; team_a_name = team_b_name; team_b_name = tmp_name
-      )
+        tmp_name     = team_a_name,
+        team_a_name  = team_b_name,
+        team_b_name  = tmp_name
+      ) |> select(-tmp_name)
   }
 
   cat(sprintf("%s vs %s:\n", result$team_a_name[1], result$team_b_name[1]))

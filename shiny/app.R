@@ -10,29 +10,57 @@ library(tidyr)
 library(readr)
 library(scales)
 library(stringr)
+library(tibble)
 
 # Resolve paths relative to shiny/ directory
 project_root <- here::here()
 OUTPUT_DIR   <- file.path(project_root, "output")
 
-load_data <- function(gender) {
+INJURY_TABLE <- tribble(
+  ~team_name,                     ~player,              ~ppg,  ~status,
+  "Texas Tech Red Raiders",       "JT Toppin",          21.8,  "OUT",
+  "Texas Tech Red Raiders",       "LeJuan Watts",       11.5,  "Questionable",
+  "North Carolina Tar Heels",     "Caleb Wilson",       19.8,  "OUT",
+  "BYU Cougars",                  "Richie Saunders",    18.0,  "OUT",
+  "Gonzaga Bulldogs",             "Braden Huff",        17.8,  "OUT",
+  "UCLA Bruins",                  "Tyler Bilodeau",     17.6,  "Questionable",
+  "UCLA Bruins",                  "Donovan Dent",       13.5,  "Questionable",
+  "Duke Blue Devils",             "Caleb Foster",        8.5,  "OUT",
+  "Duke Blue Devils",             "Patrick Ngongba II", 10.7,  "Questionable",
+  "Clemson Tigers",               "Carter Welling",     10.2,  "OUT",
+  "Vanderbilt Commodores",        "Frankie Collins",     8.5,  "OUT",
+  "Michigan Wolverines",          "L.J. Cason",          7.5,  "OUT",
+  "Kentucky Wildcats",            "Jaland Lowe",         9.2,  "OUT",
+  "Maryland Terrapins",           "Kaylene Smikle",     15.0,  "OUT",
+  "Maryland Terrapins",           "Bri McDaniel",        8.5,  "OUT",
+  "Colorado State Rams",          "Lexus Bargesser",    15.6,  "OUT"
+)
+
+load_data <- function(gender, injury_adj = FALSE) {
+  suffix <- if (injury_adj) "_injury_adj" else ""
+  proc_dir <- file.path(project_root, "data", "processed", gender)
   list(
     adv_probs = tryCatch(
-      read_csv(file.path(OUTPUT_DIR, gender, "team_advancement_probs.csv"), show_col_types = FALSE),
-      error = function(e) NULL
+      read_csv(file.path(OUTPUT_DIR, gender, paste0("team_advancement_probs", suffix, ".csv")), show_col_types = FALSE),
+      error = function(e) tryCatch(
+        read_csv(file.path(OUTPUT_DIR, gender, "team_advancement_probs.csv"), show_col_types = FALSE),
+        error = function(e2) NULL)
     ),
     champ_df = tryCatch(
-      read_csv(file.path(OUTPUT_DIR, gender, "champion_distribution.csv"), show_col_types = FALSE),
-      error = function(e) NULL
+      read_csv(file.path(OUTPUT_DIR, gender, paste0("champion_distribution", suffix, ".csv")), show_col_types = FALSE),
+      error = function(e) tryCatch(
+        read_csv(file.path(OUTPUT_DIR, gender, "champion_distribution.csv"), show_col_types = FALSE),
+        error = function(e2) NULL)
     ),
     upset_df = tryCatch(
       read_csv(file.path(OUTPUT_DIR, gender, "upset_frequency.csv"), show_col_types = FALSE),
       error = function(e) NULL
     ),
     win_probs = tryCatch(
-      read_csv(file.path(file.path(project_root, "data", "processed", gender),
-                         "win_prob_matrix_2026.csv"), show_col_types = FALSE),
-      error = function(e) NULL
+      read_csv(file.path(proc_dir, paste0("win_prob_matrix_2026", suffix, ".csv")), show_col_types = FALSE),
+      error = function(e) tryCatch(
+        read_csv(file.path(proc_dir, "win_prob_matrix_2026.csv"), show_col_types = FALSE),
+        error = function(e2) NULL)
     )
   )
 }
@@ -67,6 +95,24 @@ ui <- fluidPage(
       selectInput("gender", "Tournament:",
                   choices = c("Men's" = "men", "Women's" = "women"),
                   selected = "men"),
+
+      checkboxInput("injury_adj",
+                    HTML("<b>Apply Injury Adjustments</b><br><small style='color:#c0392b'>Updated Mar 17, 2026</small>"),
+                    value = TRUE),
+
+      conditionalPanel(
+        condition = "input.injury_adj == true",
+        div(style = "background:#fff3cd; border-left:3px solid #f39c12; padding:8px; border-radius:4px; font-size:11px; margin-bottom:8px;",
+          HTML("<b>Key injuries applied:</b><br>
+               🔴 JT Toppin (TTU) OUT – ACL<br>
+               🔴 Caleb Wilson (UNC) OUT – Thumb<br>
+               🔴 Richie Saunders (BYU) OUT – Knee<br>
+               🔴 Braden Huff (GON) OUT – Knee<br>
+               🟡 Tyler Bilodeau (UCLA) Q – Knee<br>
+               🟡 Donovan Dent (UCLA) Q – Calf<br>
+               🔴 Caleb Foster (DUKE) OUT – Foot<br>
+               🟡 P. Ngongba II (DUKE) Q – Foot"))
+      ),
 
       hr(),
       h4("Matchup Explorer"),
@@ -110,6 +156,17 @@ ui <- fluidPage(
         tabPanel("Data Table",
           br(),
           DT::dataTableOutput("adv_table")
+        ),
+        tabPanel("Injury Report",
+          br(),
+          h4("Tournament Injury Adjustments", style="color:#c0392b; font-weight:bold;"),
+          p(style="color:#666; font-size:12px;",
+            "adj_EM penalty = PPG × 0.30 (OUT) or PPG × 0.15 (Questionable). ",
+            "Applied via logistic shift: logit(p_new) = logit(p_orig) − 0.10 × (penaltyA − penaltyB)."),
+          tableOutput("injury_table"),
+          br(),
+          h4("Championship Probability: Baseline vs Injury-Adjusted"),
+          plotOutput("injury_compare_plot", height = "500px")
         )
       )
     )
@@ -121,9 +178,13 @@ ui <- fluidPage(
 # ============================================================================
 server <- function(input, output, session) {
 
-  # Reactive: load data when gender changes
+  # Reactive: load data when gender or injury toggle changes
   data <- reactive({
-    load_data(input$gender)
+    load_data(input$gender, isTRUE(input$injury_adj))
+  })
+
+  adj_label <- reactive({
+    if (isTRUE(input$injury_adj)) " (Injury-Adjusted)" else " (Baseline)"
   })
 
   # Team selectors
@@ -152,8 +213,7 @@ server <- function(input, output, session) {
     d$champ_df |>
       arrange(desc(champ_prob)) |>
       slice_head(n = 25) |>
-      mutate(team_label = paste0(team_name, " (#", seed, ")"),
-             team_label = reorder(team_label, champ_prob)) |>
+      mutate(team_label = reorder(team_name, champ_prob)) |>
       ggplot(aes(x = team_label, y = champ_prob)) +
       geom_col(aes(fill = champ_prob), show.legend = FALSE) +
       geom_text(aes(label = paste0(round(champ_prob * 100, 1), "%")),
@@ -161,7 +221,7 @@ server <- function(input, output, session) {
       coord_flip(ylim = c(0, max(d$champ_df$champ_prob) * 1.3)) +
       scale_y_continuous(labels = percent_format()) +
       scale_fill_gradient(low = "#cce5ff", high = "#003087") +
-      labs(title = paste("Championship Win Probability:", str_to_title(input$gender), "Tournament"),
+      labs(title = paste0("Championship Win Probability: ", str_to_title(input$gender), adj_label()),
            x = NULL, y = "Probability") +
       theme_minimal(base_size = 13) +
       theme(plot.title = element_text(face = "bold"))
@@ -189,7 +249,7 @@ server <- function(input, output, session) {
                 size = 2.8, color = "white") +
       scale_fill_gradient2(low = "#f7f7f7", mid = "#4292c6", high = "#003087",
                            midpoint = 0.25, labels = percent_format(), name = "Prob") +
-      labs(title = paste("Advancement Probabilities:", str_to_title(input$gender)),
+      labs(title = paste0("Advancement Probabilities: ", str_to_title(input$gender), adj_label()),
            x = "Round", y = NULL) +
       theme_minimal(base_size = 11) +
       theme(axis.text.x = element_text(angle = 30, hjust = 1),
@@ -310,6 +370,55 @@ server <- function(input, output, session) {
       labs(x = NULL, y = "Win Probability") +
       theme_minimal(base_size = 14) +
       theme(plot.title = element_text(face = "bold"))
+  })
+
+  # Injury report table
+  output$injury_table <- renderTable({
+    gender <- input$gender
+    tbl <- INJURY_TABLE
+    if (gender == "women") {
+      tbl <- tbl |> filter(team_name %in% c("Maryland Terrapins"))
+    } else {
+      tbl <- tbl |> filter(!team_name %in% c("Maryland Terrapins"))
+    }
+    tbl |>
+      mutate(
+        `adj_EM Penalty` = round(ppg * ifelse(status == "OUT", 0.30, 0.15), 2),
+        ppg = round(ppg, 1)
+      ) |>
+      select(Team = team_name, Player = player, PPG = ppg,
+             Status = status, `adj_EM Penalty`)
+  }, striped = TRUE, hover = TRUE, bordered = TRUE)
+
+  # Injury comparison plot
+  output$injury_compare_plot <- renderPlot({
+    gender <- input$gender
+    baseline <- tryCatch(
+      read_csv(file.path(OUTPUT_DIR, gender, "champion_distribution.csv"), show_col_types=FALSE),
+      error = function(e) NULL)
+    adjusted <- tryCatch(
+      read_csv(file.path(OUTPUT_DIR, gender, "champion_distribution_injury_adj.csv"), show_col_types=FALSE),
+      error = function(e) NULL)
+    if (is.null(baseline) || is.null(adjusted)) return(ggplot() + theme_void())
+
+    top_teams <- baseline |> arrange(desc(champ_prob)) |> slice_head(n=15) |> pull(team_name)
+
+    bind_rows(
+      baseline |> filter(team_name %in% top_teams) |> mutate(model = "Baseline"),
+      adjusted |> filter(team_name %in% top_teams) |> mutate(model = "Injury-Adjusted")
+    ) |>
+      mutate(team_name = factor(team_name, levels=rev(top_teams))) |>
+      ggplot(aes(x=team_name, y=champ_prob, fill=model)) +
+      geom_col(position="dodge", alpha=0.9) +
+      geom_text(aes(label=paste0(round(champ_prob*100,1),"%")),
+                position=position_dodge(width=0.9), hjust=-0.1, size=3) +
+      coord_flip(ylim=c(0, max(baseline$champ_prob)*1.4)) +
+      scale_y_continuous(labels=percent_format()) +
+      scale_fill_manual(values=c("Baseline"="#aec6e8","Injury-Adjusted"="#003087")) +
+      labs(title=paste("Baseline vs Injury-Adjusted:", str_to_title(gender)),
+           x=NULL, y="Championship Probability", fill=NULL) +
+      theme_minimal(base_size=12) +
+      theme(plot.title=element_text(face="bold"), legend.position="top")
   })
 
   # Data table
